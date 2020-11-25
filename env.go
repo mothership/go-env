@@ -93,7 +93,7 @@ func Unmarshal(es EnvSet, v interface{}) error {
 
 		var (
 			envValue string
-			ok bool
+			ok       bool
 		)
 		for _, envKey := range envTag.Keys {
 			envValue, ok = es[envKey]
@@ -123,6 +123,30 @@ func Unmarshal(es EnvSet, v interface{}) error {
 }
 
 func set(t reflect.Type, f reflect.Value, value string) error {
+	// See if the type implements Unmarshaler and use that first,
+	// otherwise, fallback to the previous logic
+	// to a scalar type
+	if t.NumMethod() > 0 && f.CanInterface() {
+		var ptr reflect.Value
+		if t.Kind() == reflect.Ptr {
+			// In the pointer case, we need to create a new element to have an
+			// address to point to
+			ptr = reflect.New(t.Elem())
+		} else {
+			// And for scalars, we need the pointer to be able to modify the value
+			ptr = f.Addr()
+		}
+		if u, ok := ptr.Interface().(Unmarshaler); ok {
+			if err := u.UnmarshalEnvironmentValue(value); err != nil {
+				return err
+			}
+			if t.Kind() == reflect.Ptr {
+				f.Set(ptr)
+			}
+			return nil
+		}
+	}
+
 	switch t.Kind() {
 	case reflect.Ptr:
 		ptr := reflect.New(t.Elem())
@@ -248,8 +272,8 @@ func Marshal(v interface{}) (EnvSet, error) {
 }
 
 type tag struct {
-	Keys []string
-	Default string
+	Keys     []string
+	Default  string
 	Required bool
 }
 
