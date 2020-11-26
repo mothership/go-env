@@ -39,6 +39,8 @@ var (
 
 	// ErrMissingRequiredValue returned when a field with required=true contains no value or default
 	ErrMissingRequiredValue = errors.New("value for this field is required")
+
+	unmarshalType = reflect.TypeOf((*Unmarshaler)(nil)).Elem()
 )
 
 // Unmarshal parses an EnvSet and stores the result in the value pointed to by
@@ -125,10 +127,17 @@ func Unmarshal(es EnvSet, v interface{}) error {
 func set(t reflect.Type, f reflect.Value, value string) error {
 	// See if the type implements Unmarshaler and use that first,
 	// otherwise, fallback to the previous logic
-	// to a scalar type
-	if t.NumMethod() > 0 && f.CanInterface() {
+	var isUnmarshaler bool
+	isPtr := t.Kind() == reflect.Ptr
+	if isPtr {
+		isUnmarshaler = t.Implements(unmarshalType) && f.CanInterface()
+	} else if f.CanAddr() {
+		isUnmarshaler = f.Addr().Type().Implements(unmarshalType) && f.Addr().CanInterface()
+	}
+
+	if isUnmarshaler {
 		var ptr reflect.Value
-		if t.Kind() == reflect.Ptr {
+		if isPtr {
 			// In the pointer case, we need to create a new element to have an
 			// address to point to
 			ptr = reflect.New(t.Elem())
@@ -140,7 +149,7 @@ func set(t reflect.Type, f reflect.Value, value string) error {
 			if err := u.UnmarshalEnvironmentValue(value); err != nil {
 				return err
 			}
-			if t.Kind() == reflect.Ptr {
+			if isPtr {
 				f.Set(ptr)
 			}
 			return nil
